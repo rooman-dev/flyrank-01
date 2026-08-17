@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Which pages should you refresh first? Ranking search-visibility decay risk</title>
+<meta name="description" content="A forward-window model that ranks web pages by the risk of losing search visibility, built on the FlyRank ML Internship warehouse.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#E8EBE6;
+  --paper-deep:#DDE2DA;
+  --ink:#16201C;
+  --ink-soft:#4A5A52;
+  --ink-faint:#7C8A82;
+  --rule:#C3CCC0;
+  --observe:#2F6F6A;   /* the three windows the model may read */
+  --withheld:#8C3A5B;  /* the window it may not */
+  --measure:38rem;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Source Serif 4",Georgia,serif;
+  font-optical-sizing:auto;
+  font-size:1.0625rem;
+  line-height:1.68;
+}
+a{color:var(--observe);text-underline-offset:.18em;text-decoration-thickness:.06em}
+a:focus-visible,button:focus-visible{outline:2px solid var(--withheld);outline-offset:3px}
+
+.wrap{max-width:72rem;margin:0 auto;padding:0 1.5rem}
+
+/* ---------- masthead ---------- */
+.masthead{padding:4.5rem 0 2rem}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace;
+  font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-faint);margin:0 0 1.6rem;
+}
+.masthead h1{
+  font-family:"Newsreader",Georgia,serif;
+  font-weight:400;font-size:clamp(2.4rem,6.2vw,4.4rem);
+  line-height:1.02;letter-spacing:-.018em;margin:0;max-width:20ch;
+}
+.masthead h1 em{font-style:italic;color:var(--withheld)}
+.byline{
+  font-family:"IBM Plex Mono",monospace;font-size:.78rem;
+  color:var(--ink-soft);margin-top:2rem;
+  display:flex;flex-wrap:wrap;gap:.5rem 1.6rem;
+}
+
+/* ---------- signature: the window diagram ---------- */
+.thesis{
+  border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);
+  padding:2.75rem 0 2.5rem;margin:2.5rem 0 0;
+}
+.thesis-lede{
+  font-family:"Newsreader",Georgia,serif;font-size:1.3rem;line-height:1.5;
+  max-width:44ch;margin:0 0 2.5rem;color:var(--ink-soft);
+}
+.windows{display:grid;grid-template-columns:repeat(4,1fr);gap:.35rem;position:relative}
+.win{
+  border:1px solid var(--observe);border-radius:2px;
+  padding:.85rem .7rem 1rem;background:transparent;
+  transform-origin:bottom;
+}
+.win.is-withheld{border-color:var(--withheld);background:rgba(140,58,91,.06)}
+.win-tag{
+  font-family:"IBM Plex Mono",monospace;font-size:.72rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--observe);display:block;margin-bottom:.35rem;
+}
+.win.is-withheld .win-tag{color:var(--withheld)}
+.win-days{font-family:"IBM Plex Mono",monospace;font-size:.74rem;color:var(--ink-faint)}
+.win-role{font-size:.9rem;line-height:1.35;margin-top:.55rem;color:var(--ink-soft)}
+.wall{
+  margin-top:.9rem;display:grid;grid-template-columns:3fr 1fr;
+  font-family:"IBM Plex Mono",monospace;font-size:.72rem;
+  letter-spacing:.08em;text-transform:uppercase;
+}
+.wall span{padding-top:.5rem;border-top:1px solid var(--observe);color:var(--observe)}
+.wall span+span{border-top-color:var(--withheld);color:var(--withheld);text-align:right}
+.thesis-note{
+  font-family:"IBM Plex Mono",monospace;font-size:.8rem;line-height:1.6;
+  color:var(--ink-soft);margin:1.6rem 0 0;max-width:60ch;
+}
+
+/* ---------- body layout ---------- */
+main{padding:1rem 0 5rem}
+.sec{
+  display:grid;grid-template-columns:7rem minmax(0,var(--measure));
+  gap:0 3rem;padding:3.5rem 0;border-bottom:1px solid var(--rule);
+  align-items:start;
+}
+.sec:last-of-type{border-bottom:0}
+.sec-num{
+  font-family:"IBM Plex Mono",monospace;font-size:.75rem;letter-spacing:.1em;
+  color:var(--ink-faint);padding-top:.55rem;position:sticky;top:1.5rem;
+}
+.sec-body h2{
+  font-family:"Newsreader",Georgia,serif;font-weight:400;
+  font-size:clamp(1.6rem,3.4vw,2.1rem);line-height:1.15;
+  letter-spacing:-.012em;margin:0 0 1.25rem;
+}
+.sec-body h3{
+  font-family:"IBM Plex Mono",monospace;font-size:.78rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-faint);
+  margin:2.25rem 0 .8rem;font-weight:500;
+}
+.sec-body p{margin:0 0 1.1rem}
+.sec-body p:last-child{margin-bottom:0}
+.lede{font-size:1.15rem;line-height:1.6}
+
+ul,ol{margin:0 0 1.1rem;padding-left:1.2rem}
+li{margin-bottom:.5rem}
+li::marker{color:var(--ink-faint)}
+
+code,.mono{font-family:"IBM Plex Mono",monospace;font-size:.86em}
+code{background:var(--paper-deep);padding:.1em .35em;border-radius:2px}
+
+/* live numbers pulled from capstone_metrics.json */
+.n{font-family:"IBM Plex Mono",monospace;font-weight:500;color:var(--withheld);white-space:nowrap}
+.n[data-empty]{
+  background:var(--withheld);color:var(--paper);
+  padding:.05em .4em;border-radius:2px;font-size:.82em;
+}
+
+blockquote{
+  margin:1.5rem 0;padding:.2rem 0 .2rem 1.4rem;
+  border-left:2px solid var(--withheld);
+  font-family:"Newsreader",Georgia,serif;font-size:1.12rem;line-height:1.5;
+}
+blockquote p{margin:0}
+
+figure{margin:2rem 0}
+figure img{width:100%;height:auto;display:block;border:1px solid var(--rule);border-radius:2px;background:#fff}
+figcaption{
+  font-family:"IBM Plex Mono",monospace;font-size:.76rem;line-height:1.6;
+  color:var(--ink-soft);margin-top:.7rem;
+}
+figcaption b{color:var(--ink);font-weight:500}
+
+table{border-collapse:collapse;width:100%;margin:1.5rem 0;font-family:"IBM Plex Mono",monospace;font-size:.82rem}
+th,td{text-align:right;padding:.55rem .5rem;border-bottom:1px solid var(--rule)}
+th:first-child,td:first-child{text-align:left}
+thead th{
+  font-weight:500;color:var(--ink-faint);font-size:.72rem;
+  letter-spacing:.08em;text-transform:uppercase;border-bottom-color:var(--ink-soft);
+}
+tbody tr:last-child td{border-bottom:0}
+.row-model td{color:var(--withheld)}
+
+.callout{
+  border:1px solid var(--rule);border-left:2px solid var(--observe);
+  border-radius:2px;padding:1.15rem 1.3rem;margin:1.75rem 0;
+  background:var(--paper-deep);
+}
+.callout p{font-size:.96rem;margin-bottom:.7rem}
+.callout p:last-child{margin-bottom:0}
+.callout .h{
+  font-family:"IBM Plex Mono",monospace;font-size:.74rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--observe);display:block;margin-bottom:.6rem;
+}
+.callout.is-limit{border-left-color:var(--withheld)}
+.callout.is-limit .h{color:var(--withheld)}
+
+.codes{list-style:none;padding:0;margin:1.5rem 0}
+.codes li{
+  display:grid;grid-template-columns:11.5rem minmax(0,1fr);gap:1rem;
+  padding:.85rem 0;border-top:1px solid var(--rule);margin:0;
+}
+.codes li:last-child{border-bottom:1px solid var(--rule)}
+.codes .code{
+  font-family:"IBM Plex Mono",monospace;font-size:.76rem;letter-spacing:.04em;
+  color:var(--withheld);padding-top:.15rem;
+}
+.codes .what{font-size:.95rem;line-height:1.5}
+.codes .what b{font-weight:600}
+
+footer{
+  border-top:1px solid var(--rule);padding:3rem 0 4rem;
+  font-family:"IBM Plex Mono",monospace;font-size:.8rem;line-height:1.75;
+  color:var(--ink-soft);
+}
+footer a{color:var(--withheld)}
+footer .credit{max-width:52ch;margin:0 0 1.5rem}
+
+@media (max-width:820px){
+  .sec{grid-template-columns:1fr;gap:0}
+  .sec-num{position:static;padding:0 0 .6rem}
+  .windows{grid-template-columns:1fr 1fr}
+  .wall{grid-template-columns:1fr 1fr}
+  .codes li{grid-template-columns:1fr;gap:.3rem}
+}
+
+@media (prefers-reduced-motion:no-preference){
+  .win{animation:settle .5s cubic-bezier(.2,.7,.3,1) backwards}
+  .win:nth-child(1){animation-delay:.05s}
+  .win:nth-child(2){animation-delay:.13s}
+  .win:nth-child(3){animation-delay:.21s}
+  .win:nth-child(4){animation-delay:.34s}
+  @keyframes settle{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">FlyRank ML Internship &middot; Capstone &middot; Refresh / Content Opportunity Scoring</p>
+    <h1>Which pages should you refresh first, when only twenty <em>fit</em> in a week?</h1>
+    <div class="byline">
+      <span>Rooman Ahmed</span>
+      <span>Machine Learning track</span>
+      <span>2026</span>
+    </div>
+  </header>
+
+  <section class="thesis" aria-label="Window design">
+    <p class="thesis-lede">The whole result rests on one decision: where the label lives. My first version predicted a trend from the same metrics that defined it. This one doesn't.</p>
+
+    <div class="windows">
+      <div class="win">
+        <span class="win-tag">W3</span>
+        <span class="win-days">day &minus;120 &rarr; &minus;90</span>
+        <p class="win-role">Impression level, oldest block</p>
+      </div>
+      <div class="win">
+        <span class="win-tag">W2</span>
+        <span class="win-days">day &minus;90 &rarr; &minus;60</span>
+        <p class="win-role">Prior momentum, prior CTR</p>
+      </div>
+      <div class="win">
+        <span class="win-tag">W1</span>
+        <span class="win-days">day &minus;60 &rarr; &minus;30</span>
+        <p class="win-role">Recent position, volatility, CTR</p>
+      </div>
+      <div class="win is-withheld">
+        <span class="win-tag">L</span>
+        <span class="win-days">day &minus;30 &rarr; 0</span>
+        <p class="win-role">The outcome. Never read by a feature.</p>
+      </div>
+    </div>
+    <div class="wall">
+      <span>Observation &mdash; 90 days the model may read</span>
+      <span>Withheld &mdash; the label</span>
+    </div>
+
+    <p class="thesis-note">A page is labelled <b>declining</b> when its impressions in <b>L</b> fall below 80% of its impressions in <b>W1</b>. Every feature is computed inside the observation span. Nothing crosses the boundary.</p>
+  </section>
+
+  <main>
+
+    <!-- 1 ABSTRACT -->
+    <section class="sec" id="abstract">
+      <div class="sec-num">01 / Abstract</div>
+      <div class="sec-body">
+        <h2>Abstract</h2>
+        <p class="lede">Which pages should a content team review first, ranked by the risk that they lose search visibility next month? Using <span class="n" data-metric="n_rows_modelled">—</span> content items from the FlyRank internship warehouse, I built features from a 90-day observation window and labelled a page declining when its impressions in the following 30-day window fell below 80% of the prior window — a forward label the features never observe. A random forest was compared against two transparent baselines on an identical split grouped by client, so every score reflects performance on organisations unseen during training. Against a base rate of <span class="n" data-metric="base_rate_test_pct">—</span>, the model reached Precision@50 of <span class="n" data-metric="rf_p50">—</span> (lift <span class="n" data-metric="rf_lift50">—</span>&times;, AUC <span class="n" data-metric="rf_auc">—</span>), against <span class="n" data-metric="mom_p50">—</span> for a momentum baseline and <span class="n" data-metric="opp_p50">—</span> for a click-opportunity rule, neither of which discriminated above chance (AUC <span class="n" data-metric="mom_auc">—</span> and <span class="n" data-metric="opp_auc">—</span>). The model's advantage concentrates at the top of the ranking, so it is presented as a triage ranker rather than a classifier. The output is a ranked review queue with reason codes, intended as decision support for an editor allocating limited hours, not as a prediction of any ranking outcome.</p>
+      </div>
+    </section>
+
+    <!-- 2 INTRODUCTION -->
+    <section class="sec" id="introduction">
+      <div class="sec-num">02 / Introduction</div>
+      <div class="sec-body">
+        <h2>The decision this supports</h2>
+        <p>A content team has bandwidth to review perhaps twenty pages a week, drawn from a library of tens of thousands. The decision is not <em>is this page healthy</em> — it is <em>which twenty go into this month's queue</em>. That framing matters, because it makes the task a ranking problem rather than a classification one. Recall across the full library is irrelevant when only the top of the list is ever read.</p>
+
+        <h3>Unit of analysis</h3>
+        <p>One content item belonging to one client, observed across a 120-day span of daily search performance.</p>
+
+        <h3>The action, and the cost of getting it wrong</h3>
+        <p>An editor opens the top-ranked pages, checks each against its reason code, and decides whether to refresh, re-title, or leave alone. Nothing is automated.</p>
+        <p>A false positive costs editor hours on a page that was fine — annoying, bounded, immediately visible. A false negative is the expensive error: a page with real traffic keeps sliding, quietly, and the loss compounds for weeks before anyone notices. The asymmetry argues for precision at the very top of the queue, which is what the evaluation measures.</p>
+
+        <h3>Why a model rather than a rule</h3>
+        <p>A fixed rule commits to thresholds in advance. Rather than assume a learned model does better, I scored both on the same split and report the gap as measured — including where it is small, and including one baseline that performs near chance. That result turned out to be the more interesting half of the work.</p>
+      </div>
+    </section>
+
+    <!-- 3 DATA -->
+    <section class="sec" id="data">
+      <div class="sec-num">03 / Data</div>
+      <div class="sec-body">
+        <h2>Data</h2>
+        <p><b>Release.</b> The FlyRank ML Internship warehouse (gated Hugging Face release), read through DuckDB over <code>hf://</code>. No full download occurs — DuckDB reads only the columns and month partitions the SQL touches, which keeps a roughly 79-million-row daily fact table workable on a free Colab CPU.</p>
+
+        <h3>Tables used</h3>
+        <ul>
+          <li><code>fact_content_daily_performance</code> — daily impressions, clicks, and average position per content item. The only table the model reads.</li>
+          <li><code>dim_clients</code> — consulted to confirm the panel is unbalanced: history depth differs per client, which constrains how far back a window can reach.</li>
+        </ul>
+
+        <h3>One table deliberately left out</h3>
+        <p><code>fact_content_query_90d</code> carries appealing query-mix signals — how many distinct queries a page ranks for, how concentrated its impressions are. I excluded it. That table aggregates a 90-day window, which necessarily overlaps the 30-day label window, so joining it would pull outcome-period impressions into the feature set. The signals are genuinely useful; capturing them safely would need a query-level cut that closes before the label window opens.</p>
+
+        <h3>Date windows, and the month left untouched</h3>
+        <p>The release spans 2025-01-27 to 2026-06-30. All four windows are measured backwards from a single anchor date, set to <b>2026-03-31</b> — mid-panel, not the end of the data.</p>
+        <p>That is deliberate. The final month of the release is the natural outcome window for any past-to-future label, so it was held back: no feature, label, or evaluation on this page reads a single day after 2026-03-31. The consequence worth stating plainly is that a genuinely untouched month remains available for out-of-sample confirmation, and this work has not run it.</p>
+        <p>For the same reason the <code>_sample</code> partition is never used here — it contains the final month only, so a 120-day lookback from it has no history to read.</p>
+
+        <h3>Exclusions</h3>
+        <ul>
+          <li>Clients whose data does not span the full 120-day window ending at the anchor. History depth varies sharply between clients; without this filter, a client whose feed stops mid-window shows a collapse in the label window that is missing data rather than decline.</li>
+          <li>Content items with fewer than 100 impressions in the most recent feature window. Below that floor a 20% swing is noise and the label would be measuring randomness.</li>
+          <li>Content items with fewer than 25 reporting days inside the label window — the same failure mode as the first exclusion, at page level.</li>
+        </ul>
+        <p>Of 519,606 content items in the release, <span class="n" data-metric="n_rows_modelled">—</span> survive. All three exclusions bite in the same direction: findings generalise to <em>visible, established</em> pages, not to the long tail. Section 06 returns to this.</p>
+
+        <h3>Two data traps handled explicitly</h3>
+        <p>An average position of zero in this warehouse means <em>no data</em>, not rank zero. Averaging those zeros in would drag every page's position toward rank 1 — toward looking excellent — so only positive values are averaged.</p>
+        <p>Missing position is flagged rather than silently filled, because missingness here follows content type: a blind fill injects a category signal disguised as a measurement.</p>
+
+        <h3>Public safety</h3>
+        <p>Only pseudonymous <code>client_hash_id</code> and <code>content_hash_id</code> appear anywhere in the pipeline, and both are used strictly for grouping — never as features, and never printed into this page. No client names, domains, URLs, or query strings appear in this work.</p>
+      </div>
+    </section>
+
+    <!-- 4 METHODOLOGY -->
+    <section class="sec" id="methodology">
+      <div class="sec-num">04 / Methodology</div>
+      <div class="sec-body">
+        <h2>Methodology</h2>
+
+        <h3>Assumptions</h3>
+        <ol>
+          <li>A page's near-future visibility is partly predictable from its own recent trajectory.</li>
+          <li>Impressions are a usable proxy for visibility. Clicks alone confound ranking position with snippet quality.</li>
+          <li>Behaviour learned on one set of clients transfers to an unseen client — tested by the split rather than assumed.</li>
+        </ol>
+
+        <h3>Label definition</h3>
+        <blockquote><p>A page is <b>declining</b> when its impressions in the final 30-day window fall below 80% of its impressions in the preceding 30-day window.</p></blockquote>
+        <p>This is a forward label, and the change from my earlier iteration is the substantive one. That version used a trailing trend flag computed over the same window as the features. A model trained that way is not forecasting — it is restating the label through correlated inputs. The numbers looked better and meant less.</p>
+
+        <h3>Features</h3>
+        <p>Nine features, all computed inside the observation span: log impression level in W1; CTR in W1 and its change from W2; impression momentum across W1/W2 and again across W2/W3; average position in W1 and its shift from W2; within-window position volatility; and the share of days in W1 on which the page drew any impressions at all.</p>
+        <p>Two things are absent on purpose. Any query-mix signal, for the overlap reason above. And any product flag or health score — a feature that exists only because someone already made the decision you are predicting is leakage by construction.</p>
+
+        <h3>Baselines</h3>
+        <p>Two transparent rules, both scored on the same split as the model.</p>
+        <ul>
+          <li><b>Momentum</b> — rank by how far impressions already fell from W2 to W1. Aimed at the same construct as the label, so it is a fair opponent.</li>
+          <li><b>Click opportunity</b> — <code>impressions &times; (1 &minus; CTR)</code>, the standard heuristic. Included specifically to test whether click opportunity and decline risk are the same thing.</li>
+        </ul>
+
+        <h3>Validation design</h3>
+        <p><code>GroupShuffleSplit</code> on <code>client_hash_id</code>, 25% held out, seed 42. No client's pages appear on both sides, so the reported score reflects performance on a brand-new client — the way the tool would actually be deployed. Because time separation is already built into the label, the evaluation is grouped <em>and</em> forward-looking.</p>
+        <p>Held out: <span class="n" data-metric="n_rows_test">—</span> rows across <span class="n" data-metric="n_clients_test">—</span> unseen clients.</p>
+
+        <h3>Leakage checks</h3>
+        <p>Three assertions in the capstone notebook, written to fail loudly rather than print reassurance: no label-derived column reaches the feature list; no feature correlates with the label above 0.95, which would mean it <em>is</em> the label in disguise; and the client-overlap count between train and test is asserted to be exactly zero. A leakage check that can only print "PASS" is not a check.</p>
+      </div>
+    </section>
+
+    <!-- 5 RESULTS -->
+    <section class="sec" id="results">
+      <div class="sec-num">05 / Results</div>
+      <div class="sec-body">
+        <h2>Results</h2>
+        <p>Every precision figure below sits next to the base rate, because on this task the base rate is high enough to flatter any ranker. Lift is Precision@K divided by the base rate: 1.00 is indistinguishable from ranking at random, and below 1.00 is worse than random.</p>
+
+        <table>
+          <caption class="mono" style="caption-side:top;text-align:left;color:var(--ink-faint);padding-bottom:.6rem;font-size:.74rem;letter-spacing:.08em;text-transform:uppercase">Held-out clients &middot; base rate <span class="n" data-metric="base_rate_test_pct">—</span></caption>
+          <thead>
+            <tr><th>Method</th><th>P@20</th><th>Lift</th><th>P@50</th><th>Lift</th><th>AUC</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Momentum baseline</td>
+              <td><span class="n" data-metric="mom_p20">—</span></td><td><span class="n" data-metric="mom_lift20">—</span></td>
+              <td><span class="n" data-metric="mom_p50">—</span></td><td><span class="n" data-metric="mom_lift50">—</span></td>
+              <td><span class="n" data-metric="mom_auc">—</span></td>
+            </tr>
+            <tr>
+              <td>Click-opportunity rule</td>
+              <td><span class="n" data-metric="opp_p20">—</span></td><td><span class="n" data-metric="opp_lift20">—</span></td>
+              <td><span class="n" data-metric="opp_p50">—</span></td><td><span class="n" data-metric="opp_lift50">—</span></td>
+              <td><span class="n" data-metric="opp_auc">—</span></td>
+            </tr>
+            <tr class="row-model">
+              <td>Random forest</td>
+              <td><span class="n" data-metric="rf_p20">—</span></td><td><span class="n" data-metric="rf_lift20">—</span></td>
+              <td><span class="n" data-metric="rf_p50">—</span></td><td><span class="n" data-metric="rf_lift50">—</span></td>
+              <td><span class="n" data-metric="rf_auc">—</span></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <figure>
+          <img src="figures/fig1_precision_vs_baserate.png" alt="Bar chart comparing Precision@20 and Precision@50 for the momentum baseline, the click-opportunity rule, and the random forest, with a dashed line marking the base rate.">
+          <figcaption><b>Figure 1.</b> Ranking quality against the base rate on held-out clients. The dashed line is what a random ranker scores at every K — bars below it are worse than chance.</figcaption>
+        </figure>
+
+        <div class="callout">
+          <span class="h">The finding worth reading twice</span>
+          <p>Both transparent rules land at an AUC of roughly 0.49 — chance. Neither momentum nor the click-opportunity heuristic carries usable signal about which pages decline next month. Their Precision@50 figures sit slightly above the base rate, but at a queue length of fifty that difference is inside the noise band and should not be read as skill.</p>
+          <p>The model reaches an AUC of 0.629. That is modest in absolute terms, and it is the difference between a signal and none. Its Precision@50 lift of 1.82&times; over the base rate is where that signal becomes useful, because the first fifty entries are the only part of a review queue anyone works through.</p>
+          <p>The honest summary is narrow: a weak global classifier that is a usable triage ranker, measured against rules that are neither.</p>
+        </div>
+
+        <figure>
+          <img src="figures/fig2_feature_importance.png" alt="Horizontal bar chart of random forest feature importances across the nine features.">
+          <figcaption><b>Figure 2.</b> What the model leans on. Read as association within the measured window — these are not causes of decline, and nothing here identifies a mechanism.</figcaption>
+        </figure>
+
+        <figure>
+          <img src="figures/fig3_precision_at_k_curve.png" alt="Line chart of Precision@K against queue length K on a log scale for all three methods, with a base-rate reference line.">
+          <figcaption><b>Figure 3.</b> Precision decays as the queue lengthens. The practical read: the ranking is worth trusting for a short weekly queue and progressively less so past that point.</figcaption>
+        </figure>
+
+        <h3>Error analysis</h3>
+        <p>Of the top 50 ranked pages, <span class="n" data-metric="fp_top50">—</span> were not declining. The two groups are near-identical on volume, CTR, and coverage; they separate on position movement. False positives showed a median position shift of +0.66 places against them across the observation window, versus +0.26 for the true positives — the model read a worsening rank as the leading edge of impression loss, and for these pages it was not.</p>
+        <p>The pattern behind the whole top of the queue is mean reversion. Both groups had roughly tripled their impressions from the prior window, and the model has learned that pages which spike tend to fall back. It cannot separate a spike that will revert from one that has found a new level, because at window resolution the two look the same. That also explains why the false positives showed <em>lower</em> prior-period momentum: their growth was more recent, with less history to revert toward.</p>
+        <p>This reframes what the model does. It is less a decay detector than an unsustainable-growth detector, and the overlap between those two things is the source of most of its errors.</p>
+      </div>
+    </section>
+
+    <!-- 6 LIMITATIONS -->
+    <section class="sec" id="limitations">
+      <div class="sec-num">06 / Limitations</div>
+      <div class="sec-body">
+        <h2>Limitations &amp; honest framing</h2>
+
+        <div class="callout is-limit">
+          <span class="h">What this work cannot claim</span>
+          <p>Nothing here is an experiment, so nothing here is causal. This work does not show that staleness causes decline, that refreshing a page reverses a decline, or anything at all about why a search ranking moved. It reports association within a measured window.</p>
+        </div>
+
+        <ol>
+          <li><b>Nothing about the ranking algorithm.</b> The data records outcomes, not mechanism. Any sentence resembling "the algorithm rewards X" is outside what this data can support.</li>
+          <li><b>The label is a proxy.</b> A greater-than-20% impression drop stands in for "worth reviewing," but a page can decline for reasons no refresh addresses: seasonality, a results-page layout change, a competitor launch, or demand that has genuinely gone away.</li>
+          <li><b>The consolidation check could not be completed.</b> When a sibling page absorbs a page's demand, the page falls while the topic does not. Grouping by keyword hash returned too few multi-page groups for the test to say anything, so consolidation remains an unmeasured alternative explanation for an unknown share of flagged declines.</li>
+          <li><b>Few test clients.</b> The held-out split contains <span class="n" data-metric="n_clients_test">—</span> clients, and client sizes are very uneven, so a client-count split yields an unbalanced row split. Cross-validated spread across folds is reported alongside the headline figure for this reason.</li>
+          <li><b>Not every flagged decline persisted.</b> Splitting the label window in half, only <span class="n" data-metric="persisted_share">—</span> of flagged pages fell across both halves. The headline label counts blips alongside sustained decay; the strict variant is reported as a robustness check.</li>
+          <li><b>One forward window, one cut.</b> Results come from a single 30-day window at the end of the panel. This is not a multi-period backtest, and a different month could behave differently.</li>
+          <li><b>No semantic context.</b> The model never reads the page. It cannot separate a stale guide that needs rewriting from an evergreen reference that is fine, or from a navigational page that should never enter the queue.</li>
+          <li><b>Unbalanced panel.</b> History depth varies by client, so clients with shorter tenure are underrepresented among the pages surviving the 120-day requirement.</li>
+          <li><b>Survivorship in the exclusion.</b> The 100-impression floor removes exactly the long tail where some decline happens. Conclusions hold for visible pages.</li>
+          <li><b>Thresholds are choices.</b> The 20% drop, the 100-impression floor, and the 30-day window length are defensible but arbitrary, and their sensitivity is untested here.</li>
+        </ol>
+
+        <p>Throughout: <span class="mono">observed</span>, <span class="mono">measured</span>, <span class="mono">directional</span>, <span class="mono">decision-support</span>.</p>
+      </div>
+    </section>
+
+    <!-- 7 RECOMMENDATIONS -->
+    <section class="sec" id="recommendations">
+      <div class="sec-num">07 / Recommendations</div>
+      <div class="sec-body">
+        <h2>Ranked recommendations</h2>
+        <p>The model supplies the <em>ranking</em>. The reason codes are a transparent rule layered on top to explain why a page surfaced. That division is deliberate and worth stating plainly: the model does not choose actions, and presenting rule-derived actions as model output would misrepresent the method.</p>
+
+        <ul class="codes">
+          <li>
+            <span class="code">POSITION_SLIP</span>
+            <span class="what"><b>Investigate ranking loss.</b> Average position moved more than a full place against the page over the observation span. Check for a competitor gain or a lost result feature before touching the content.</span>
+          </li>
+          <li>
+            <span class="code">MOMENTUM_DECAY</span>
+            <span class="what"><b>Full content refresh.</b> Impressions fell across consecutive windows without a matching position slip — usually a demand or coverage shift rather than a ranking event.</span>
+          </li>
+          <li>
+            <span class="code">VISIBLE_LOW_CTR</span>
+            <span class="what"><b>Title and meta review.</b> Above-median visibility with below-median CTR. The page is being seen and not chosen, which is a packaging problem before it is a content problem.</span>
+          </li>
+          <li>
+            <span class="code">STABLE</span>
+            <span class="what"><b>Monitor and hold.</b> No action this cycle. Re-scored next month.</span>
+          </li>
+        </ul>
+
+        <h3>How an editor would use it tomorrow</h3>
+        <p>Pull the top twenty. Work down the list, checking each page against its reason code rather than acting on the rank alone. Return the ones the code doesn't fit — that disagreement is the most valuable feedback the system can receive, because it is the only signal that reaches the part of the problem the data cannot see.</p>
+
+        <div class="callout is-limit">
+          <span class="h">No-go list</span>
+          <p>No automated deletion or unpublishing on a low-traffic flag — those pages often carry internal linking structure that nothing in this data measures. No generative rewriting of a flagged page without a subject-matter editor. Legal, privacy, and compliance pages are exempt from the queue entirely, regardless of score.</p>
+        </div>
+
+        <h3>Where the reason codes fail</h3>
+        <p>The ranking works; the explanatory layer on top of it does not, and reporting that is more useful than hiding it. Measured against the base rate, <code>POSITION_SLIP</code> flags pages <em>less</em> likely to decline than a page drawn at random, and <code>MOMENTUM_DECAY</code> barely clears it. Only <code>VISIBLE_LOW_CTR</code> selects a meaningfully higher-risk group.</p>
+        <p>The reason codes are threshold rules written by hand, and the error analysis shows why they misfire: the model's top-ranked pages are overwhelmingly recent spikes it expects to revert, a state none of the four codes was designed to name. The codes should be treated as descriptive labels for an editor's context, not as a second ranking — and rebuilt from the mean-reversion pattern the model actually found.</p>
+
+        <h3>Confidence</h3>
+        <p>Directional and bounded. The ranking is worth trusting for a short weekly queue on visible, established pages, on the evidence of one forward window. It is not validated for long queues, thin pages, or repeated periods.</p>
+      </div>
+    </section>
+
+    <!-- 8 REPRODUCIBILITY -->
+    <section class="sec" id="reproducibility">
+      <div class="sec-num">08 / Reproducibility</div>
+      <div class="sec-body">
+        <h2>Reproducibility</h2>
+        <p>Every number on this page is generated by <code>work/notebooks/capstone.ipynb</code> and written to <code>work/outputs/capstone_metrics.json</code>, which is committed. This page reads that file directly, so the figures here cannot drift from the run that produced them.</p>
+
+        <h3>From a fresh clone</h3>
+        <ol>
+          <li>Request access to the warehouse dataset on Hugging Face and create a read token.</li>
+          <li>Set <code>HF_TOKEN</code> as an environment variable or a Colab secret. Never paste it into a cell.</li>
+          <li>Open <code>work/notebooks/capstone.ipynb</code> and run all cells. Set <code>USE_SAMPLE = True</code> for a fast pass; <code>False</code> reproduces the published run.</li>
+          <li>Charts land in <code>work/figures/</code>, metrics in <code>work/outputs/capstone_metrics.json</code>.</li>
+        </ol>
+
+        <p><b>Seed:</b> <code>RANDOM_STATE = 42</code>, applied to the split and the forest. <b>Environment:</b> <code>duckdb</code>, <code>scikit-learn</code>, <code>pandas</code>, <code>matplotlib</code>; versions pinned in <code>requirements.txt</code>.</p>
+
+        <p><b>Notebooks:</b> weekly assignments and the capstone are in <code>work/notebooks/</code>. <b>Repo:</b> <a href="https://github.com/rooman-dev/flyrank-01">github.com/rooman-dev/flyrank-01</a>.</p>
+
+        <p>No dataset CSV is committed anywhere — the repo's CI enforces this. The metrics JSON is committed on purpose: it is the receipt every number above traces back to.</p>
+      </div>
+    </section>
+
+    <!-- 9 ACKNOWLEDGMENTS -->
+    <section class="sec" id="acknowledgments">
+      <div class="sec-num">09 / Credit</div>
+      <div class="sec-body">
+        <h2>Acknowledgments &amp; data credit</h2>
+        <p>Built on the FlyRank ML Internship dataset — <a href="https://flyrank.ai">flyrank.ai</a>.</p>
+        <p>Thanks to the FlyRank ML track team for the warehouse release and the starter notebooks, and in particular for the framing that a leakage check which can only pass is not a check. The strongest result in this work is a baseline performing near chance, and the material made that feel like a finding rather than a failure.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <p class="credit">Built on the FlyRank ML Internship dataset — <a href="https://flyrank.ai">flyrank.ai</a>. Observational analysis, decision-support only. No causal claims. No client-identifying data appears in this work.</p>
+    <p>Rooman Ahmed &middot; FlyRank AI Internship, Machine Learning track &middot; 2026</p>
+  </footer>
+</div>
+
+<script>
+// Populate every .n span from the committed metrics file, so the page and the
+// notebook can never disagree. If the file is missing, each number renders as a
+// visible placeholder rather than a plausible-looking wrong figure.
+(async function () {
+  const spans = document.querySelectorAll('.n[data-metric]');
+  const markEmpty = () => spans.forEach(s => {
+    if (s.textContent.trim() === '—' || s.textContent.trim() === '') {
+      s.textContent = 'run notebook';
+      s.setAttribute('data-empty', '');
+    }
+  });
+
+  let m;
+  try {
+    const res = await fetch('capstone_metrics.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status);
+    m = await res.json();
+  } catch (e) {
+    markEmpty();
+    return;
+  }
+
+  const byMethod = {};
+  (m.results || []).forEach(r => {
+    if (/momentum/i.test(r.method)) byMethod.mom = r;
+    else if (/opportunity/i.test(r.method)) byMethod.opp = r;
+    else if (/forest/i.test(r.method)) byMethod.rf = r;
+  });
+
+  const f3 = v => (v === undefined || v === null) ? null : Number(v).toFixed(3);
+  const f2 = v => (v === undefined || v === null) ? null : Number(v).toFixed(2);
+  const pick = (k, f) => byMethod[k] ? f(byMethod[k]) : null;
+
+  const values = {
+    n_rows_modelled: m.n_rows_modelled != null ? m.n_rows_modelled.toLocaleString() : null,
+    n_rows_test: m.n_rows_test != null ? m.n_rows_test.toLocaleString() : null,
+    n_clients_test: m.n_clients_test != null ? String(m.n_clients_test) : null,
+    base_rate_test_pct: m.base_rate_test != null ? (m.base_rate_test * 100).toFixed(1) + '%' : null,
+    fp_top50: m.false_positives_in_top50 != null ? String(m.false_positives_in_top50) : null,
+    consolidation_share: m.consolidation_share != null ? (m.consolidation_share * 100).toFixed(0) + '%' : null,
+    persisted_share: m.share_of_declines_persisted != null ? (m.share_of_declines_persisted * 100).toFixed(0) + '%' : null,
+    excluded_note: null
+  };
+
+  ['mom', 'opp', 'rf'].forEach(k => {
+    values[k + '_p20']    = pick(k, r => f3(r['P@20']));
+    values[k + '_p50']    = pick(k, r => f3(r['P@50']));
+    values[k + '_lift20'] = pick(k, r => f2(r['lift@20']));
+    values[k + '_lift50'] = pick(k, r => f2(r['lift@50']));
+    values[k + '_auc']    = pick(k, r => f3(r['AUC']));
+  });
+
+  spans.forEach(s => {
+    const v = values[s.dataset.metric];
+    if (v) { s.textContent = v; s.removeAttribute('data-empty'); }
+  });
+  markEmpty();
+})();
+</script>
+</body>
+</html>

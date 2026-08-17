@@ -1,0 +1,88 @@
+{
+  "random_state": 42,
+  "source": "FlyRank/internship-warehouse build v20260703, anchor 2026-03-31 (development run)",
+  "label_definition": "gsc_impressions in (end-30, end] < 0.8 x gsc_impressions in (end-60, end-30]",
+  "feature_windows": "(end-120, end-30] only; label window never read by a feature",
+  "excluded_tables": {
+    "fact_content_query_90d": "fact_content_query_90d aggregates a 90-day window that overlaps the 30-day label window (end-30, end]. Joining it would leak outcome-period impressions into the feature set, so it is excluded."
+  },
+  "exclusions": "content items with imp_w1 < 100 or without a full 120-day history",
+  "split": "GroupShuffleSplit on client_hash_id, test_size=0.25",
+  "n_rows_modelled": 70557,
+  "n_rows_test": 41709,
+  "n_clients_test": 7,
+  "base_rate_overall": 0.2478,
+  "base_rate_test": 0.2525,
+  "strict_label_rate": 0.165,
+  "share_of_declines_persisted": 0.6659,
+  "consolidation_share": 0.0,
+  "results": [
+    {
+      "method": "Baseline A - momentum",
+      "P@20": 0.25,
+      "lift@20": 0.99,
+      "P@50": 0.3,
+      "lift@50": 1.19,
+      "AUC": 0.494
+    },
+    {
+      "method": "Baseline B - opportunity",
+      "P@20": 0.4,
+      "lift@20": 1.58,
+      "P@50": 0.34,
+      "lift@50": 1.35,
+      "AUC": 0.486
+    },
+    {
+      "method": "Random forest",
+      "P@20": 0.4,
+      "lift@20": 1.58,
+      "P@50": 0.46,
+      "lift@50": 1.82,
+      "AUC": 0.629
+    }
+  ],
+  "feature_importance": [
+    {
+      "feature": "pos_w1",
+      "importance": 0.16868
+    },
+    {
+      "feature": "imp_momentum",
+      "importance": 0.15834
+    },
+    {
+      "feature": "imp_momentum_2",
+      "importance": 0.14396
+    },
+    {
+      "feature": "pos_delta",
+      "importance": 0.13813
+    },
+    {
+      "feature": "imp_w1_log",
+      "importance": 0.11053
+    },
+    {
+      "feature": "pos_sd_w1",
+      "importance": 0.10095
+    },
+    {
+      "feature": "ctr_w1",
+      "importance": 0.07312
+    },
+    {
+      "feature": "ctr_delta",
+      "importance": 0.06428
+    },
+    {
+      "feature": "active_share",
+      "importance": 0.04203
+    },
+    {
+      "feature": "has_position",
+      "importance": 0.0
+    }
+  ],
+  "false_positives_in_top50": 27
+}
